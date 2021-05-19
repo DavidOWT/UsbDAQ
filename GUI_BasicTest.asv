@@ -524,23 +524,21 @@ if dataBeingLogged == true
         ColorBank = {[0 0 0],[0.6 0.6 0.6],[1 0.1 0.1],[0.2 0.2 0.2],[1 0.3 0.3],[0.4 0.4 0.4],...
             [1 0.5 0.5],[1 0.7 0.7]};
         LineBank = {'-', '--', '-.', ':', '-', '--', '-.', ':'};
-        for indFig = 1:size(reqCapture,2) 
-            LgdTextEnd{indFig} = sprintf('Channel %i',ActiveChannels(indFig));
-        end
+
         
         figure
-        axeEnd = axes;
         hold on
 
         for indFig = 1:size(reqCapture,2)
-            pltDatEnd{indFig} = plot(reqCaptureTime, reqCapture(:,indFig));
-            pltDatEnd{indFig}.Color = ColorBank{indFig};
-            pltDatEnd{indFig}.LineStyle = LineBank{indFig};
-            pltDatEnd{indFig}.DisplayName = LgdTextEnd{indFig};
-            
+            PltDat{indFig} = plot(AxeNme, reqCaptureTime, reqCapture(:,indFig));
+            PltDat{indFig}.Color = ColorBank{indFig};
+            PltDat{indFig}.LineStyle = LineBank{indFig};
         end
+        
         plotbrowser('on')
 
+
+        
         %   Signal to exit waiting loop
         exitWait = 1;
     end
@@ -655,7 +653,7 @@ end
 %   If 1st loop plot trigger and add legend 
 if event.TimeStamps(1) == 0
     if exist('TrigVal', 'var')
-        PltTrig = plot([0 600], [TrigVal TrigVal]);
+        PltTrig = plot([0 10], [TrigVal TrigVal]);
         %   Assume logging will be less than 10 minutes
         PltTrig.Color = [1 0 0];
     end
