@@ -11,6 +11,7 @@
 %
 %
 %   DW - 15/05/21 - Modified with trigger
+%   DW - 20/05/21 - Tested with PD
 %%  Main
 function varargout = GUI_BasicTest(varargin)
 % GUI_BASICTEST MATLAB code for GUI_BasicTest.fig
@@ -36,7 +37,7 @@ function varargout = GUI_BasicTest(varargin)
 
 % Edit the above text to modify the response to help GUI_BasicTest
 
-% Last Modified by GUIDE v2.5 15-May-2021 17:31:52
+% Last Modified by GUIDE v2.5 19-May-2021 15:26:36
 
 % Begin initialization code - DO NOT EDIT
 gui_Singleton = 1;
@@ -267,9 +268,9 @@ function pushbutton1_Callback(~, eventdata, handles)
 
 
 %%   Initiation
-%   Extract input strings (duration, rate, filename)
 daqreset
 
+%   Extract input strings (duration, rate, filename)
 for i = 1:5
     DAQInput{i} = ExtractString(handles, i);
 end
@@ -277,15 +278,13 @@ end
 %   Extract active channel and calibration data
 ChanCal = handles.uitable1.Data;
 ActChn = cell2mat(ChanCal(:,1));
+ActiveChannels = find(ActChn)-1;    %
+
 CalFct = cell2mat(ChanCal(:,2));
 
 optionPlot = handles.checkbox6.Value;
 optionTrig = handles.checkbox4.Value;
 optionCont = handles.checkbox3.Value;
-
-TimeStamp = clock;
-logFName = sprintf('%s_Date%0.2i%0.2i%0.2i_Time%0.2i%0.2i%0.2i%s', DAQInput{3}(1:end-4), TimeStamp(1:5) , ...
-                round(TimeStamp(end)), DAQInput{3}(end-3:end));
 
 %   Trigger options
 if optionTrig == 1
@@ -307,15 +306,27 @@ bufferSize = ceil(bufferRefillPeriod * sampleFreq);
 numBuffers = numPretriggerBuffers + (captureLength/bufferRefillPeriod) + 1; % plus 1 to account for mid refill trigger
 currentBuffer = 1;
 
+%   Create log file
+TimeStamp = clock;
+logFName = sprintf('%s_Date%0.2i%0.2i%0.2i_Time%0.2i%0.2i%0.2i%s', DAQInput{3}(1:end-4), TimeStamp(1:5) , ...
+                round(TimeStamp(end)), DAQInput{3}(end-3:end));
+fid1 = CreateLog(logFName, DAQInput, TimeStamp, ActiveChannels);
+
+%   Log data, format
+FrmtPrp = cell(1,length(ActiveChannels));
+FrmtPrp(:) = {'%f\t'};
+FrmtPrp(end+1) = {'\n'}; % OLD '\r\n'
+Frmt = strcat(FrmtPrp{:});
+
+
 
 %%  Create Data Acquisition Session
-%daqreset                        % Delete and previous 
+%   Session
 s = daq.createSession('ni');
 s.Rate = sampleFreq;             
 s.IsContinuous = true;
 
-%   Add channels and set channel properties, if any.
-ActiveChannels = find(ActChn)-1;    %
+%   Add channels
 ch = addAnalogInputChannel(s,'Dev1',ActiveChannels,'Voltage');
 
 %   Change recording to single ended
@@ -328,20 +339,12 @@ if optionPlot == 1
     Axe1 = RecordFig(ActiveChannels);
 end
 
-%   Make log-file
-fid1 = CreateLog(logFName, DAQInput, TimeStamp, ActiveChannels);
-
-%   Log data, format
-FrmtPrp = cell(1,length(ActiveChannels));
-FrmtPrp(:) = {'%f\t'};
-FrmtPrp(end+1) = {'\n'}; % OLD '\r\n'
-Frmt = strcat(FrmtPrp{:});
 
 
 %%  Logging options 
 %   Define the set of buffers
-myCircularBuffers = zeros(bufferSize, numChannels, numBuffers);
-myCircularTimeBuffer = zeros(bufferSize, 1, numBuffers);
+circularBuffers = zeros(bufferSize, numChannels, numBuffers);
+circularTimeBuffer = zeros(bufferSize, 1, numBuffers);
 
 %   Logic for logging
 dataBeingLogged = false;
@@ -364,7 +367,6 @@ if optionCont == 1
     LstRec = addlistener(s,'DataAvailable',@(src, event)continuousData(src, event)); %   Trigger / record data    
 end
 
-
 %   Initiate logging variables
 trigInd = 0;
 global exitWait
@@ -373,6 +375,7 @@ exitWait = 0; % Logic for exiting the waiting loop
 %   Variable for stop button
 global StpRecord
 StpRecord = 0;
+
 
 
 %%  Check inputs 
@@ -388,6 +391,7 @@ if and(optionTrig, optionCont)
 end
 
 
+
 %%  Logging
 %   Start logging
 startBackground(s);
@@ -400,6 +404,7 @@ while exitWait == 0
     start(T)
     wait(T)  
 end
+
 
 
 %%  Post-process
@@ -421,7 +426,7 @@ if not(StpRecord == 1) % If exist recording don't make plot
 
         for i = 1:length(ActiveChannels)
             [Pxy,W] = cpsd(RecData.ProcData(:,i),RecData.ProcData(:,i),[],0,...
-                RecData.Freq/0.001, RecData.Freq);
+                RecData.Freq/0.0001, RecData.Freq);
             PltFFT(i) = plot(W,Pxy);
         end
         % AxeFft.Title.String = 'Fft of data-logger recording';
@@ -446,8 +451,7 @@ if not(StpRecord == 1) % If exist recording don't make plot
 
 end
 
-
-%%   Tidy workspae
+%   Tidy workspae
 clear
 fclose('all');
 daqreset
@@ -474,8 +478,8 @@ newData = event.Data;
 newTime = event.TimeStamps;
 
 % Refill the buffer and throw out data beyond pretrigger time (FIFO)
-myCircularBuffers = cat(3, myCircularBuffers(:,:,2:end), newData);
-myCircularTimeBuffer = cat(3, myCircularTimeBuffer(:,:,2:end), newTime);
+circularBuffers = cat(3, circularBuffers(:,:,2:end), newData);
+circularTimeBuffer = cat(3, circularTimeBuffer(:,:,2:end), newTime);
 
 
 %   Trigger
@@ -492,9 +496,9 @@ end
 if dataBeingLogged == true
     if currentBuffer == (captureLength/bufferRefillPeriod) + 1 % +1 to account for the padded buffer (line 27)
         % Reorganize data once trigger condition met
-        myCircularBuffers = permute(myCircularBuffers, [1 3 2]); % rearrange 3D matrix for proper reshape
-        myCircularBuffers = reshape(myCircularBuffers, numBuffers*bufferSize, numChannels);
-        myCircularTimeBuffer = reshape(myCircularTimeBuffer, numBuffers*bufferSize, 1);
+        circularBuffers = permute(circularBuffers, [1 3 2]); % rearrange 3D matrix for proper reshape
+        circularBuffers = reshape(circularBuffers, numBuffers*bufferSize, numChannels);
+        circularTimeBuffer = reshape(circularTimeBuffer, numBuffers*bufferSize, 1);
         
         % Clean up HW resources
         s.stop();
@@ -508,10 +512,10 @@ if dataBeingLogged == true
         % the buffer.
         numBufferSamples = numPretriggerBuffers*bufferSize; 
         fullCapTrigInd = numBufferSamples + trigInd;
-        trigTime = myCircularTimeBuffer(fullCapTrigInd);
+        trigTime = circularTimeBuffer(fullCapTrigInd);
         numCapSamples = captureLength * sampleFreq;
-        reqCapture = myCircularBuffers((fullCapTrigInd-numBufferSamples):(fullCapTrigInd+numCapSamples),:);
-        reqCaptureTime = myCircularTimeBuffer((fullCapTrigInd-numBufferSamples):(fullCapTrigInd+numCapSamples),:) - trigTime;
+        reqCapture = circularBuffers((fullCapTrigInd-numBufferSamples):(fullCapTrigInd+numCapSamples),:);
+        reqCaptureTime = circularTimeBuffer((fullCapTrigInd-numBufferSamples):(fullCapTrigInd+numCapSamples),:) - trigTime;
 
         % 	Output    
         RecordData(reqCapture, fid1, Frmt)  %   Write data to logfile
@@ -758,4 +762,3 @@ RecData.Data = Data;
 
 
 end
-
